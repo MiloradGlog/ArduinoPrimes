@@ -6,7 +6,7 @@
 #define NUMBER_OF_SLAVES 1 
 #define MAX_NUMBER_OF_SLAVES 1
 #define MAX_BUFFER_SPACE 1024
-#define DEBUG 0
+#define DEBUG 1
 
 #define SLAVE_STATE_FREE 1
 #define SLAVE_STATE_WORKING 2
@@ -46,6 +46,7 @@ BufferedInput bufferedInputs[NUMBER_OF_SLAVES];
 
 int MAX_RANGE = MAX_BUFFER_SPACE/sizeof(long)/NUMBER_OF_SLAVES;
 int NUMBER_OF_PACKAGES = 0;
+int NUMBER_OF_PACKAGES_LEFT_TO_SEND = 0;
 int LAST_PRINTED_PACKAGE = 0;
 int MAX_PACKAGE_BUFFER = 512 / sizeof(Package);
 
@@ -55,6 +56,9 @@ long x = -1;
 long y = -1;
 
 QueueList<Package> packages;
+
+long RANGE = -1;
+int CURRENT_PACKAGE_NUMBER = 0;
 
 int AVAILABLE_SLAVE_ADDRESSES[NUMBER_OF_SLAVES]; 
 int ALL_SLAVE_ADDRESSES[MAX_NUMBER_OF_SLAVES] = {8};
@@ -106,7 +110,7 @@ void serialEvent(){
 }
 
 void checkActive(){
-  if (NUMBER_OF_PACKAGES > 0){
+  if (NUMBER_OF_PACKAGES_LEFT_TO_SEND > 0){
     IS_ACTIVE = true;
   }
   else{
@@ -119,6 +123,21 @@ void checkActive(){
 
 void loop() {
 
+
+
+  
+  
+  while(CURRENT_PACKAGE_NUMBER < NUMBER_OF_PACKAGES && packages.count() < 10 && IS_ACTIVE){
+      if (DEBUG){
+    Serial.print("Usao u while, trenutni paket: ");
+    Serial.println(CURRENT_PACKAGE_NUMBER);
+  }
+    generateSinglePackage();
+  }
+
+
+
+  
   checkAllSlaves();
   checkActive();
   checkReleaseTimeout(); 
@@ -206,7 +225,7 @@ void requestBufferSize(int slaveAddress){
   CURRENT_INPUT_PACKAGE_NUMBER = Wire.read();
   CURRENT_INPUT_SIZE = Wire.read();
   
-  NUMBER_OF_PACKAGES--;
+  NUMBER_OF_PACKAGES_LEFT_TO_SEND--;
   
   if (DEBUG){
     Serial.println("\n----Stize paket----: ");
@@ -217,7 +236,7 @@ void requestBufferSize(int slaveAddress){
     Serial.print("VELICINA PAKETA: ");
     Serial.println(CURRENT_INPUT_SIZE);
     Serial.print("NUMBER OF PACKAGES LEFT: ");
-    Serial.println(NUMBER_OF_PACKAGES);
+    Serial.println(NUMBER_OF_PACKAGES_LEFT_TO_SEND);
   }
 
 
@@ -277,12 +296,9 @@ void printInputPackage(BufferedInput *in){
 void startReadingSerial(){
 
   parseInputFromSerial();
-  checkOverflow();
+  //checkOverflow();
   printStatus();
   generatePackages();
-  if (DEBUG) {
-    printPackages();
-  }
   
 }
 
@@ -332,6 +348,8 @@ void printAvailableSlaveAddresses(){
 
 
 void endEvent(){
+  RANGE = 0;
+  CURRENT_PACKAGE_NUMBER = 0;
   releaseSlaves();
   Serial.println("--------KRAJ--------");
 }
@@ -412,47 +430,51 @@ void checkOverflow(){
  */
 void generatePackages(){
   long i = 0;
-  long range = (y - x) / MIN_NUMBER_OF_PACKAGES;
+  RANGE = (y - x) / MIN_NUMBER_OF_PACKAGES;
  
-  if (range > MAX_RANGE){
-    range = MAX_RANGE;
+  if (RANGE > MAX_RANGE){
+    RANGE = MAX_RANGE;
   }
   if ((y - x) < MIN_NUMBER_OF_PACKAGES){
-    range = 1;
+    RANGE = 1;
   }
   
-  NUMBER_OF_PACKAGES = (y - x) / range;
-  
+  NUMBER_OF_PACKAGES = (y - x) / RANGE;
+  NUMBER_OF_PACKAGES_LEFT_TO_SEND = NUMBER_OF_PACKAGES;
   
   if (DEBUG){
     Serial.print("range je: ");
-    Serial.println(range);
+    Serial.println(RANGE);
     Serial.print("broj paketa je: ");
     Serial.println(NUMBER_OF_PACKAGES);
   }
-  
-  long localX = x;
-  Package p;
-  for (i = 0; i < NUMBER_OF_PACKAGES - 1; i++){
-    parseLongsToPackage(localX, localX + range, &p);
-    p.packageNum = i + 1;
-    packages.push(p);
-    localX = localX + range;
-  }
-    parseLongsToPackage(localX, localX + range, &p);
-    p.packageNum = i + 1;
-    packages.push(p);
+  generateSinglePackage();
 }
+
+
+void generateSinglePackage(){
+  if (NUMBER_OF_PACKAGES_LEFT_TO_SEND < 1){
+    Serial.println("Ne mogu da generisem, nema paketa");
+    return;
+  }
+  Package p;
+  parseLongsToPackage(x, x + RANGE, &p);
+  p.packageNum = ++CURRENT_PACKAGE_NUMBER;
+  packages.push(p);
+  x = x + RANGE;
+  if (DEBUG){
+    Serial.println("Generisao sam paket: ");
+    printPackage(p);
+  }
+}
+
+
 /*
  * Funkcija koja printuje generisane pakete na serial
  */
-void printPackages(){
-  int i = 0;
-  Package p;
-  for (i = 0; i < NUMBER_OF_PACKAGES; i++){
-    p = packages.pop();
+void printPackage(Package p){
     Serial.print("Paket: ");
-    Serial.println(i + 1);
+    Serial.println(p.packageNum);
     Serial.print("X = ");
     Serial.println(parseBytesToX(&p));
     Serial.print("Byte 3 = ");
@@ -476,8 +498,7 @@ void printPackages(){
     Serial.println(p.y[3]);
 
     Serial.println("-------------------------------");
-    packages.push(p);
-  }
+  
   
 }
 
